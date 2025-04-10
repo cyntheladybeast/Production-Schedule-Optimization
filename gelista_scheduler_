@@ -1,0 +1,68 @@
+import streamlit as st
+import pandas as pd
+
+# --- Assume Data Loading and Preprocessing is already done ---
+# For this example, we assume that df_all_sizes is already processed and contains the following columns:
+# 'Finished Product Name', 'ALLERGEN_PRIORITY', 'COLOR_RANK', and 'COLOR_CLEAN'
+# You can load your preprocessed data from a file, for example:
+@st.cache_data
+def load_data():
+    # Replace "combined_data.xlsx" with the actual path to your processed DataFrame file.
+    # The data should be saved as a CSV or Excel file from your earlier processing.
+    df = pd.read_excel("Gelista_Combined_Data.xlsx")
+    # Ensure column names are stripped of extra whitespace
+    df.columns = df.columns.str.strip()
+    return df
+
+df_all_sizes = load_data()
+
+# --- Streamlit App Interface ---
+st.title("Gelista Production Scheduler")
+st.write("Welcome to the Gelista Production Scheduler web application! Enter one or more product names (or keywords) separated by commas to receive a recommended production sequence based on allergen safety and color sequencing.")
+
+# Input widget: Text input for product names
+user_input = st.text_input("Enter product names or keywords (e.g., Vanilla Bean, Pistachio, Chocolate):")
+
+# Function to recommend production sequence using partial matching
+def recommend_sequence(orders, master_df):
+    import re
+    # Create a regex pattern for partial, case-insensitive matching
+    pattern = '|'.join([rf"(?i).*{re.escape(order.strip())}.*" for order in orders if order.strip() != ''])
+    matched = master_df[master_df['Finished Product Name'].str.contains(pattern, na=False, regex=True)].copy()
+
+    if matched.empty:
+        return None
+    # Sort by allergen priority and then by color rank in ascending order
+    matched = matched.sort_values(by=["ALLERGEN_PRIORITY", "COLOR_RANK"], ascending=[True, True])
+    return matched
+
+# Button to generate production order
+if st.button("Generate Production Order"):
+    # Split the input string into individual product search terms
+    orders = [order.strip() for order in user_input.split(",") if order.strip()]
+    
+    if not orders:
+        st.warning("Please enter at least one product name.")
+    else:
+        production_plan = recommend_sequence(orders, df_all_sizes)
+        if production_plan is None or production_plan.empty:
+            st.error("No matching products found. Please check the product names and try again.")
+        else:
+            st.success("Recommended Production Order Generated:")
+            st.dataframe(production_plan[["Finished Product Name", "COLOR_CLEAN", "ALLERGEN_PRIORITY"]])
+            # Optionally, allow the user to download the results as an Excel file
+            @st.cache
+            def convert_df_to_excel(df):
+                import io
+                output = io.BytesIO()
+                writer = pd.ExcelWriter(output, engine='xlsxwriter')
+                df.to_excel(writer, index=False, sheet_name="Production_Order")
+                writer.save()
+                processed_data = output.getvalue()
+                return processed_data
+
+            production_excel = convert_df_to_excel(production_plan[["Finished Product Name", "COLOR_CLEAN", "ALLERGEN_PRIORITY"]])
+            st.download_button(label="Download Production Order as Excel",
+                               data=production_excel,
+                               file_name="Recommended_Production_Order.xlsx",
+                               mime="application/vnd.ms-excel")
